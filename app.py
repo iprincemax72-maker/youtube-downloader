@@ -17,12 +17,13 @@ os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 IS_WINDOWS = platform.system() == "Windows"
 
-# Find ffmpeg: bundled (PyInstaller) or system paths
-if getattr(sys, 'frozen', False):
-    # Running as PyInstaller bundle — ffmpeg is next to the exe
+# Find ffmpeg
+if IS_WINDOWS and getattr(sys, 'frozen', False):
+    # Windows PyInstaller bundle — ffmpeg is bundled next to the exe
     FFMPEG_DIR = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
 else:
-    FFMPEG_DIR = ""
+    # macOS / dev — use system ffmpeg
+    FFMPEG_DIR = "/opt/homebrew/bin" if os.path.isdir("/opt/homebrew/bin") else "/usr/local/bin"
 
 # Ensure ffmpeg is findable
 for p in [FFMPEG_DIR, "/opt/homebrew/bin", "/usr/local/bin"]:
