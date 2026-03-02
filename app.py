@@ -336,7 +336,7 @@ class App(ctk.CTk):
         threading.Thread(target=self._download_thread, args=(url, self._download_id), daemon=True).start()
 
     def _download_thread(self, url, my_id):
-        import glob
+        import glob, time
         try:
             output_dir = self.folder_var.get()
             quality = self.quality_var.get()
@@ -382,6 +382,8 @@ class App(ctk.CTk):
             }
             opts = {k: v for k, v in opts.items() if v is not None}
 
+            start_time = time.time()
+
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 title = info.get("title", "Unknown")
@@ -391,6 +393,11 @@ class App(ctk.CTk):
                 if self._download_id != my_id:
                     return
 
+                # Get the actual filename yt-dlp will use
+                prepared = ydl.prepare_filename(info)
+                ext = "mp3" if audio_only else "mp4"
+                expected_file = os.path.splitext(prepared)[0] + "." + ext
+
                 self.after(0, self._set_status, "Downloading...")
                 ydl.download([url])
 
@@ -398,17 +405,16 @@ class App(ctk.CTk):
                 return
 
             # Find the downloaded file
-            safe_title = title.replace("/", "_")
-            ext = "mp3" if audio_only else "mp4"
-            expected = os.path.join(output_dir, safe_title + "." + ext)
-            if os.path.exists(expected):
-                downloaded_file = expected
+            downloaded_file = None
+            if os.path.exists(expected_file):
+                downloaded_file = expected_file
             else:
-                candidates = glob.glob(os.path.join(output_dir, safe_title + ".*"))
+                # Fallback: find newest mp4/mp3 in output dir created after we started
+                search_ext = "*.mp3" if audio_only else "*.mp4"
+                candidates = glob.glob(os.path.join(output_dir, search_ext))
+                candidates = [f for f in candidates if os.path.getmtime(f) >= start_time]
                 if candidates:
                     downloaded_file = max(candidates, key=os.path.getmtime)
-                else:
-                    downloaded_file = None
 
             # Re-encode to H.264 for Premiere Pro compatibility
             if not audio_only and downloaded_file and downloaded_file.endswith(".mp4"):
