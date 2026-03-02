@@ -7,21 +7,33 @@ import threading
 import tkinter as tk
 from tkinter import filedialog
 
+import platform
+import sys
+
 import certifi
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-# Ensure ffmpeg is findable (Homebrew paths not in bundled app's PATH)
-for p in ["/opt/homebrew/bin", "/usr/local/bin"]:
-    if p not in os.environ.get("PATH", ""):
-        os.environ["PATH"] = p + ":" + os.environ.get("PATH", "")
+IS_WINDOWS = platform.system() == "Windows"
+
+# Find ffmpeg: bundled (PyInstaller) or system paths
+if getattr(sys, 'frozen', False):
+    # Running as PyInstaller bundle — ffmpeg is next to the exe
+    FFMPEG_DIR = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
+else:
+    FFMPEG_DIR = ""
+
+# Ensure ffmpeg is findable
+for p in [FFMPEG_DIR, "/opt/homebrew/bin", "/usr/local/bin"]:
+    if p and p not in os.environ.get("PATH", ""):
+        sep = ";" if IS_WINDOWS else ":"
+        os.environ["PATH"] = p + sep + os.environ.get("PATH", "")
 
 import customtkinter as ctk
 import yt_dlp
 
 DOWNLOAD_DIR = os.path.expanduser("~/Downloads")
-FFMPEG_DIR = "/opt/homebrew/bin"
 
 QUALITY_MAP = {
     "Best":   "bestvideo[vcodec^=avc]+bestaudio/bestvideo+bestaudio/best",
@@ -165,8 +177,10 @@ class App(ctk.CTk):
         self._last_downloaded_file = None
         self._build_ui()
 
-        # Set up menu bar icon after tkinter is initialized
-        self._has_menubar = setup_menubar()
+        # Set up menu bar icon after tkinter is initialized (macOS only)
+        self._has_menubar = False
+        if not IS_WINDOWS:
+            self._has_menubar = setup_menubar()
         if self._has_menubar:
             self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -250,8 +264,9 @@ class App(ctk.CTk):
         self.again_button.pack(side="left")
 
         # ── Show in Finder (right below download) ──
+        show_text = "Show in Explorer" if IS_WINDOWS else "Show in Finder"
         self.show_button = ctk.CTkButton(
-            self, text="Show in Finder", height=36, corner_radius=10,
+            self, text=show_text, height=36, corner_radius=10,
             font=ctk.CTkFont(size=13),
             fg_color="gray30", hover_color="gray40",
             command=self._show_in_finder)
@@ -294,10 +309,16 @@ class App(ctk.CTk):
         self.progress_bar.set(value)
 
     def _show_in_finder(self):
-        if self._last_downloaded_file and os.path.exists(self._last_downloaded_file):
-            subprocess.Popen(["open", "-R", self._last_downloaded_file])
+        if IS_WINDOWS:
+            if self._last_downloaded_file and os.path.exists(self._last_downloaded_file):
+                subprocess.Popen(["explorer", "/select,", self._last_downloaded_file])
+            else:
+                subprocess.Popen(["explorer", self.folder_var.get()])
         else:
-            subprocess.Popen(["open", self.folder_var.get()])
+            if self._last_downloaded_file and os.path.exists(self._last_downloaded_file):
+                subprocess.Popen(["open", "-R", self._last_downloaded_file])
+            else:
+                subprocess.Popen(["open", self.folder_var.get()])
 
     def _reset(self):
         if self._downloading:
