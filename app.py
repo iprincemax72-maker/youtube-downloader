@@ -36,12 +36,12 @@ import yt_dlp
 DOWNLOAD_DIR = os.path.expanduser("~/Downloads")
 
 QUALITY_MAP = {
-    "Best":   "bestvideo[vcodec^=avc]+bestaudio/bestvideo+bestaudio/best",
-    "4K":     "bestvideo[height<=2160][vcodec^=avc]+bestaudio/bestvideo[height<=2160]+bestaudio/best[height<=2160]",
-    "1440p":  "bestvideo[height<=1440][vcodec^=avc]+bestaudio/bestvideo[height<=1440]+bestaudio/best[height<=1440]",
-    "1080p":  "bestvideo[height<=1080][vcodec^=avc]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-    "720p":   "bestvideo[height<=720][vcodec^=avc]+bestaudio/bestvideo[height<=720]+bestaudio/best[height<=720]",
-    "480p":   "bestvideo[height<=480][vcodec^=avc]+bestaudio/bestvideo[height<=480]+bestaudio/best[height<=480]",
+    "Best":   "bestvideo+bestaudio/best",
+    "4K":     "bestvideo[height<=2160]+bestaudio/best[height<=2160]/bestvideo+bestaudio/best",
+    "1440p":  "bestvideo[height<=1440]+bestaudio/best[height<=1440]/bestvideo+bestaudio/best",
+    "1080p":  "bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best",
+    "720p":   "bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best",
+    "480p":   "bestvideo[height<=480]+bestaudio/best[height<=480]/bestvideo+bestaudio/best",
 }
 
 FORMAT = QUALITY_MAP["Best"]
