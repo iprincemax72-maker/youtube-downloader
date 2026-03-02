@@ -24,12 +24,12 @@ DOWNLOAD_DIR = os.path.expanduser("~/Downloads")
 FFMPEG_DIR = "/opt/homebrew/bin"
 
 QUALITY_MAP = {
-    "Best":   "bestvideo+bestaudio/best",
-    "4K":     "bestvideo[height<=2160]+bestaudio/best[height<=2160]",
-    "1440p":  "bestvideo[height<=1440]+bestaudio/best[height<=1440]",
-    "1080p":  "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-    "720p":   "bestvideo[height<=720]+bestaudio/best[height<=720]",
-    "480p":   "bestvideo[height<=480]+bestaudio/best[height<=480]",
+    "Best":   "bestvideo[vcodec^=avc]+bestaudio/bestvideo+bestaudio/best",
+    "4K":     "bestvideo[height<=2160][vcodec^=avc]+bestaudio/bestvideo[height<=2160]+bestaudio/best[height<=2160]",
+    "1440p":  "bestvideo[height<=1440][vcodec^=avc]+bestaudio/bestvideo[height<=1440]+bestaudio/best[height<=1440]",
+    "1080p":  "bestvideo[height<=1080][vcodec^=avc]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+    "720p":   "bestvideo[height<=720][vcodec^=avc]+bestaudio/bestvideo[height<=720]+bestaudio/best[height<=720]",
+    "480p":   "bestvideo[height<=480][vcodec^=avc]+bestaudio/bestvideo[height<=480]+bestaudio/best[height<=480]",
 }
 
 FORMAT = QUALITY_MAP["Best"]
@@ -75,7 +75,7 @@ def setup_menubar():
                         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
                         "merge_output_format": "mp4",
                         "noplaylist": True, "quiet": True, "no_warnings": True,
-                "ffmpeg_location": FFMPEG_DIR,
+                        "ffmpeg_location": FFMPEG_DIR,
                     }
                     with yt_dlp.YoutubeDL(opts) as ydl:
                         info = ydl.extract_info(url, download=False)
@@ -161,7 +161,8 @@ class App(ctk.CTk):
 
         self._downloading = False
         self._cancelled = False
-        self._dl_proc = None
+        self._download_id = 0
+        self._last_downloaded_file = None
         self._build_ui()
 
         # Set up menu bar icon after tkinter is initialized
@@ -173,90 +174,130 @@ class App(ctk.CTk):
         self.withdraw()
 
     def _build_ui(self):
-        pad = {"padx": 20, "pady": (8, 0)}
+        px = 24
 
-        ctk.CTkLabel(self, text="YouTube URL", anchor="w").pack(fill="x", **pad)
-        self.url_entry = ctk.CTkEntry(self, placeholder_text="https://www.youtube.com/watch?v=...")
-        self.url_entry.pack(fill="x", padx=20, pady=(4, 0))
+        # ── URL ──
+        ctk.CTkLabel(self, text="Paste a YouTube link", anchor="w",
+                     font=ctk.CTkFont(size=13), text_color="gray").pack(fill="x", padx=px, pady=(14, 0))
+        self.url_entry = ctk.CTkEntry(self, height=40, corner_radius=10,
+                                       placeholder_text="https://www.youtube.com/watch?v=...")
+        self.url_entry.pack(fill="x", padx=px, pady=(4, 0))
 
-        ctk.CTkLabel(self, text="Quality", anchor="w").pack(fill="x", **pad)
+        # ── Quality + Switches (same row) ──
+        options_row = ctk.CTkFrame(self, fg_color="transparent")
+        options_row.pack(fill="x", padx=px, pady=(16, 0))
+
+        quality_frame = ctk.CTkFrame(options_row, fg_color="transparent")
+        quality_frame.pack(side="left", padx=(0, 20))
+        ctk.CTkLabel(quality_frame, text="Quality", anchor="w",
+                     font=ctk.CTkFont(size=13), text_color="gray").pack(anchor="w")
         self.quality_var = ctk.StringVar(value="Best")
         self.quality_menu = ctk.CTkOptionMenu(
-            self, variable=self.quality_var, values=list(QUALITY_MAP.keys()), width=200)
-        self.quality_menu.pack(anchor="w", padx=20, pady=(4, 0))
+            quality_frame, variable=self.quality_var,
+            values=list(QUALITY_MAP.keys()), width=150, height=32, corner_radius=8)
+        self.quality_menu.pack(anchor="w", pady=(4, 0))
 
-        toggle_frame = ctk.CTkFrame(self, fg_color="transparent")
-        toggle_frame.pack(fill="x", padx=20, pady=(14, 0))
+        switch_frame = ctk.CTkFrame(options_row, fg_color="transparent")
+        switch_frame.pack(side="left", fill="y")
 
-        self.premiere_var = ctk.BooleanVar(value=False)
-        self.premiere_switch = ctk.CTkSwitch(toggle_frame, text="Premiere Pro compatible",
-                                              variable=self.premiere_var)
-        self.premiere_switch.pack(side="left", padx=(0, 30))
+        self.audio_only_var = ctk.BooleanVar(value=False)
+        self.audio_only_switch = ctk.CTkSwitch(switch_frame, text="Audio Only (MP3)",
+                                                variable=self.audio_only_var,
+                                                command=self._on_audio_only_toggle)
+        self.audio_only_switch.pack(anchor="w", pady=(6, 0))
 
-        self.audio_var = ctk.BooleanVar(value=False)
-        self.audio_switch = ctk.CTkSwitch(toggle_frame, text="Audio only (MP3 320kbps)",
-                                           variable=self.audio_var, command=self._on_audio_toggle)
-        self.audio_switch.pack(side="left")
+        self.video_only_var = ctk.BooleanVar(value=False)
+        self.video_only_switch = ctk.CTkSwitch(switch_frame, text="Video Only (No Sound)",
+                                                variable=self.video_only_var,
+                                                command=self._on_video_only_toggle)
+        self.video_only_switch.pack(anchor="w", pady=(4, 0))
 
-        ctk.CTkLabel(self, text="Output Folder", anchor="w").pack(fill="x", **pad)
-        folder_frame = ctk.CTkFrame(self, fg_color="transparent")
-        folder_frame.pack(fill="x", padx=20, pady=(4, 0))
-
+        # ── Save to ──
+        ctk.CTkLabel(self, text="Save to", anchor="w",
+                     font=ctk.CTkFont(size=13), text_color="gray").pack(fill="x", padx=px, pady=(16, 0))
+        folder_row = ctk.CTkFrame(self, fg_color="transparent")
+        folder_row.pack(fill="x", padx=px, pady=(4, 0))
         self.folder_var = ctk.StringVar(value=DOWNLOAD_DIR)
-        self.folder_entry = ctk.CTkEntry(folder_frame, textvariable=self.folder_var)
+        self.folder_entry = ctk.CTkEntry(folder_row, textvariable=self.folder_var,
+                                          height=34, corner_radius=8)
         self.folder_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        ctk.CTkButton(folder_frame, text="Browse", width=80, command=self._browse).pack(side="left")
+        ctk.CTkButton(folder_row, text="Browse", width=80, height=34,
+                      corner_radius=8, fg_color="gray30", hover_color="gray40",
+                      command=self._browse).pack(side="left")
 
+        # ── Download / Cancel / New ──
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=20, pady=(20, 0))
+        btn_frame.pack(fill="x", padx=px, pady=(22, 0))
 
         self.dl_button = ctk.CTkButton(
-            btn_frame, text="Download", height=42, font=ctk.CTkFont(size=15, weight="bold"),
+            btn_frame, text="Download", height=48, corner_radius=12,
+            font=ctk.CTkFont(size=16, weight="bold"),
             command=self._start_download)
-        self.dl_button.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.dl_button.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
         self.cancel_button = ctk.CTkButton(
-            btn_frame, text="Cancel", width=100, height=42, font=ctk.CTkFont(size=15, weight="bold"),
+            btn_frame, text="Cancel", width=90, height=48, corner_radius=12,
+            font=ctk.CTkFont(size=14, weight="bold"),
             fg_color="#cc0000", hover_color="#990000", state="disabled",
             command=self._cancel_download)
-        self.cancel_button.pack(side="left", padx=(5, 5))
+        self.cancel_button.pack(side="left", padx=(0, 6))
 
         self.again_button = ctk.CTkButton(
-            btn_frame, text="New", width=80, height=42, font=ctk.CTkFont(size=15, weight="bold"),
+            btn_frame, text="New", width=70, height=48, corner_radius=12,
+            font=ctk.CTkFont(size=14, weight="bold"),
             fg_color="#2d8a4e", hover_color="#1e6b3a",
             command=self._reset)
         self.again_button.pack(side="left")
 
-        self.progress_bar = ctk.CTkProgressBar(self)
-        self.progress_bar.pack(fill="x", padx=20, pady=(16, 0))
-        self.progress_bar.set(0)
+        # ── Show in Finder (right below download) ──
+        self.show_button = ctk.CTkButton(
+            self, text="Show in Finder", height=36, corner_radius=10,
+            font=ctk.CTkFont(size=13),
+            fg_color="gray30", hover_color="gray40",
+            command=self._show_in_finder)
+        self.show_button.pack(fill="x", padx=px, pady=(8, 0))
 
-        self.status_label = ctk.CTkLabel(self, text="Ready", anchor="w",
-                                          font=ctk.CTkFont(size=12), text_color="gray")
-        self.status_label.pack(fill="x", padx=20, pady=(6, 0))
+        # ── Progress ──
+        self.progress_bar = ctk.CTkProgressBar(self, height=6, corner_radius=3)
+        self.progress_bar.pack(fill="x", padx=px, pady=(18, 0))
+        self.progress_bar.set(0)
 
         self.title_label = ctk.CTkLabel(self, text="", anchor="w", wraplength=560,
                                          font=ctk.CTkFont(size=12))
-        self.title_label.pack(fill="x", padx=20, pady=(4, 10))
+        self.title_label.pack(fill="x", padx=px, pady=(8, 0))
+
+        self.status_label = ctk.CTkLabel(self, text="Ready", anchor="w",
+                                          font=ctk.CTkFont(size=12), text_color="gray")
+        self.status_label.pack(fill="x", padx=px, pady=(2, 16))
+
+    def _on_audio_only_toggle(self):
+        if self.audio_only_var.get():
+            self.video_only_var.set(False)
+            self.quality_menu.configure(state="disabled")
+        else:
+            self.quality_menu.configure(state="normal")
+
+    def _on_video_only_toggle(self):
+        if self.video_only_var.get():
+            self.audio_only_var.set(False)
+            self.quality_menu.configure(state="normal")
 
     def _browse(self):
         path = filedialog.askdirectory(initialdir=self.folder_var.get())
         if path:
             self.folder_var.set(path)
 
-    def _on_audio_toggle(self):
-        if self.audio_var.get():
-            self.quality_menu.configure(state="disabled")
-            self.premiere_switch.configure(state="disabled")
-        else:
-            self.quality_menu.configure(state="normal")
-            self.premiere_switch.configure(state="normal")
-
     def _set_status(self, text):
         self.status_label.configure(text=text)
 
     def _set_progress(self, value):
         self.progress_bar.set(value)
+
+    def _show_in_finder(self):
+        if self._last_downloaded_file and os.path.exists(self._last_downloaded_file):
+            subprocess.Popen(["open", "-R", self._last_downloaded_file])
+        else:
+            subprocess.Popen(["open", self.folder_var.get()])
 
     def _reset(self):
         if self._downloading:
@@ -265,14 +306,13 @@ class App(ctk.CTk):
         self._set_progress(0)
         self._set_status("Ready")
         self.title_label.configure(text="")
+        self._last_downloaded_file = None
         self.url_entry.focus()
 
     def _cancel_download(self):
-        self._cancelled = True
-        if self._dl_proc and self._dl_proc.poll() is None:
-            os.killpg(os.getpgid(self._dl_proc.pid), 9)
+        self._download_id += 1  # abandon current thread
         self._downloading = False
-        self._dl_proc = None
+        self._cancelled = True
         self._set_status("Cancelled.")
         self._set_progress(0)
         self.dl_button.configure(state="normal", text="Download")
@@ -287,105 +327,112 @@ class App(ctk.CTk):
             return
         self._downloading = True
         self._cancelled = False
-        self._dl_proc = None
+        self._download_id += 1
         self.dl_button.configure(state="disabled", text="Downloading...")
         self.cancel_button.configure(state="normal")
         self._set_progress(0)
         self._set_status("Fetching video info...")
         self.title_label.configure(text="")
-        threading.Thread(target=self._download_thread, args=(url,), daemon=True).start()
+        threading.Thread(target=self._download_thread, args=(url, self._download_id), daemon=True).start()
 
-    def _download_thread(self, url):
-        import json, re, signal
+    def _download_thread(self, url, my_id):
+        import glob
         try:
             output_dir = self.folder_var.get()
-            audio_only = self.audio_var.get()
-            premiere = self.premiere_var.get()
             quality = self.quality_var.get()
+            audio_only = self.audio_only_var.get()
+            video_only = self.video_only_var.get()
 
-            # Get video info first (fast, in-process)
-            opts = {"quiet": True, "no_warnings": True}
+            if audio_only:
+                fmt = "bestaudio/best"
+                postprocessors = [{"key": "FFmpegExtractAudio",
+                                   "preferredcodec": "mp3", "preferredquality": "320"}]
+            elif video_only:
+                base = QUALITY_MAP.get(quality, QUALITY_MAP["Best"])
+                fmt = base.split("+")[0]
+                postprocessors = []
+            else:
+                fmt = QUALITY_MAP.get(quality, QUALITY_MAP["Best"])
+                postprocessors = []
+
+            def progress_hook(d):
+                if self._download_id != my_id:
+                    raise Exception("cancelled")
+                if d["status"] == "downloading":
+                    total = d.get("total_bytes") or d.get("total_bytes_estimate")
+                    downloaded = d.get("downloaded_bytes", 0)
+                    if total and total > 0:
+                        self.after(0, self._set_progress, downloaded / total)
+                    speed = d.get("_speed_str", "")
+                    eta = d.get("_eta_str", "")
+                    pct_str = d.get("_percent_str", "")
+                    self.after(0, self._set_status, f"Downloading {pct_str}   Speed: {speed}   ETA: {eta}")
+                elif d["status"] == "finished":
+                    self.after(0, self._set_status, "Merging streams...")
+                    self.after(0, self._set_progress, 0.95)
+
+            opts = {
+                "format": fmt,
+                "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
+                "merge_output_format": "mp4" if not audio_only else None,
+                "progress_hooks": [progress_hook],
+                "postprocessors": postprocessors,
+                "noplaylist": True, "quiet": True, "no_warnings": True,
+                "ffmpeg_location": FFMPEG_DIR,
+            }
+            opts = {k: v for k, v in opts.items() if v is not None}
+
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 title = info.get("title", "Unknown")
                 duration = info.get("duration_string", "?")
-                self.after(0, self.title_label.configure, {"text": f"{title}  ({duration})"})
+                self.after(0, lambda t=title, d=duration: self.title_label.configure(text=f"{t}  ({d})"))
 
-            if self._cancelled:
+                if self._download_id != my_id:
+                    return
+
+                self.after(0, self._set_status, "Downloading...")
+                ydl.download([url])
+
+            if self._download_id != my_id:
                 return
 
-            # Build yt-dlp command
-            if audio_only:
-                fmt = "bestaudio/best"
+            # Find the downloaded file
+            safe_title = title.replace("/", "_")
+            ext = "mp3" if audio_only else "mp4"
+            expected = os.path.join(output_dir, safe_title + "." + ext)
+            if os.path.exists(expected):
+                downloaded_file = expected
             else:
-                fmt = QUALITY_MAP.get(quality, QUALITY_MAP["Best"])
+                candidates = glob.glob(os.path.join(output_dir, safe_title + ".*"))
+                if candidates:
+                    downloaded_file = max(candidates, key=os.path.getmtime)
+                else:
+                    downloaded_file = None
 
-            cmd = [
-                "/Library/Frameworks/Python.framework/Versions/3.14/bin/yt-dlp",
-                "-f", fmt,
-                "-o", os.path.join(output_dir, "%(title)s.%(ext)s"),
-                "--newline",
-                "--no-playlist",
-                "--ffmpeg-location", FFMPEG_DIR,
-            ]
-            if not audio_only:
-                cmd += ["--merge-output-format", "mp4"]
-            if audio_only:
-                cmd += ["-x", "--audio-format", "mp3", "--audio-quality", "320K"]
-            cmd.append(url)
+            # Re-encode to H.264 for Premiere Pro compatibility
+            if not audio_only and downloaded_file and downloaded_file.endswith(".mp4"):
+                codec = self._get_video_codec(downloaded_file)
+                if codec and codec != "h264":
+                    self.after(0, self._set_status, f"Re-encoding to H.264 (was {codec})...")
+                    self.after(0, self._set_progress, 0.5)
+                    self._reencode_to_h264(downloaded_file)
 
-            self.after(0, self._set_status, "Downloading...")
-            self._dl_proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, preexec_fn=os.setsid)
-
-            # Parse progress from yt-dlp output
-            for line in self._dl_proc.stdout:
-                line = line.strip()
-                m = re.search(r'(\d+\.?\d*)%', line)
-                if m:
-                    pct = float(m.group(1)) / 100.0
-                    self.after(0, self._set_progress, pct)
-                if "ETA" in line or "%" in line:
-                    self.after(0, self._set_status, line[:80])
-                elif "Merging" in line or "merger" in line.lower():
-                    self.after(0, self._set_status, "Merging streams...")
-                    self.after(0, self._set_progress, 0.95)
-
-            self._dl_proc.wait()
-
-            if self._cancelled:
+            if self._download_id != my_id:
                 return
 
-            if self._dl_proc.returncode != 0:
-                self.after(0, self._set_status, "Download failed.")
-                self.after(0, self._set_progress, 0)
-                return
-
-            # Premiere Pro re-encode if needed
-            if not audio_only and premiere:
-                # Find the output file
-                safe_title = title.replace("/", "_")
-                mp4_path = os.path.join(output_dir, safe_title + ".mp4")
-                if os.path.exists(mp4_path):
-                    codec = self._get_video_codec(mp4_path)
-                    if codec and codec != "h264":
-                        self.after(0, self._set_status, f"Re-encoding to H.264 (was {codec})...")
-                        self.after(0, self._set_progress, 0.5)
-                        self._reencode_to_h264(mp4_path)
-
+            self._last_downloaded_file = downloaded_file
             self.after(0, self._set_progress, 1.0)
             self.after(0, self._set_status, f"Done! Saved to {output_dir}")
         except Exception as e:
-            if not self._cancelled:
+            if self._download_id == my_id and not self._cancelled:
                 self.after(0, self._set_status, f"Error: {e}")
                 self.after(0, self._set_progress, 0)
         finally:
-            self._downloading = False
-            self._cancelled = False
-            self._dl_proc = None
-            self.after(0, self.dl_button.configure, {"state": "normal", "text": "Download"})
-            self.after(0, self.cancel_button.configure, {"state": "disabled"})
+            if self._download_id == my_id:
+                self._downloading = False
+                self.after(0, lambda: self.dl_button.configure(state="normal", text="Download"))
+                self.after(0, lambda: self.cancel_button.configure(state="disabled"))
 
     @staticmethod
     def _get_video_codec(filepath):
