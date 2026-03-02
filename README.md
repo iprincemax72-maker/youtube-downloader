@@ -8,9 +8,8 @@ Go to the **[Latest Release](https://github.com/iprincemax72-maker/youtube-downl
 
 ### Windows
 
-1. Download **`YouTubeDownloader-Windows.zip`** from the release
-2. Extract the zip file
-3. Open the extracted folder and double-click **`YouTube Downloader.exe`**
+1. Download **`YouTubeDownloader.exe`** from the release
+2. Double-click **`YouTubeDownloader.exe`** to run it
 4. If Windows shows "Windows protected your PC" — click **More info** then **Run anyway** (this is normal for unsigned apps)
 
 ### Mac
