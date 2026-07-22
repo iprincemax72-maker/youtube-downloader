@@ -399,6 +399,7 @@ class App(ctk.CTk):
                 "merge_output_format": "mp4" if not audio_only else None,
                 "progress_hooks": [progress_hook],
                 "postprocessors": postprocessors,
+                "postprocessor_args": {"merger": ["-c:a", "aac", "-b:a", "256k"]} if not audio_only else None,
                 "noplaylist": True, "quiet": True, "no_warnings": True,
                 "ffmpeg_location": FFMPEG_DIR,
             }
